@@ -66,6 +66,7 @@ such as recent USB/power errors.
 3. **Name** (device / owner) and **Backup date** (`YYYY-MM-DD`, empty = "no date").
    **Will be saved as** shows the final folder, e.g. `/media/me/BIGDISK/BACKUPS/Phones/Samsung A30 - 2027-03-01`.
 4. Optional **Rescan the drive first**: only if files were added/removed on the drive outside this app.
+   **Compare files by** (default *Identical content*): see [Dedup rules](#7-dedup-rules) for the name modes.
 5. **Analyze**. The first time on a drive, its index is built first (progress shown in the status line).
    The table shows:
 
@@ -102,6 +103,7 @@ lellx-add ~/phone-dump --drive LELLX --into BACKUPS/Phones --name "Samsung A30" 
 lellx-add ~/phone-dump --drive LELLX --into BACKUPS/Phones --name "Samsung A30" --date 2027-03-01 --apply
 lellx-add ... --apply --delete-source
 lellx-add ~/stuff --folder /mnt/nas/backups --name Stuff --apply      # any folder as target
+lellx-add ... --match name          # or name+size: compare by file name instead of content
 lellx-add ... --report plan.tsv --quiet                              # TSV report, summary only
 lellx-add --drive LELLX --find IMG_0597                              # where is it?
 lellx-add --drive LELLX --status | --rescan | --eject
@@ -110,6 +112,21 @@ lellx-add --drive LELLX --status | --rescan | --eject
 connected it can be omitted.
 
 ## 7. Dedup rules
+**Compare files by** (app option, CLI `--match`):
+
+| Mode | A file is skipped when the drive already has… | Speed |
+|---|---|---|
+| **Identical content** (default, `content`) | a byte-identical file (same size + sha256), any name | reads files of equal size |
+| **Same file name and size** (`name+size`) | a file with the same name and the same size, anywhere | fast, only lists names |
+| **Same file name only** (`name`) | a file with the same name, anywhere (the reason shows if the size differs) | fast, only lists names |
+
+Name matching ignores upper/lower case and the folder. **Name modes don't compare content**: a different file that
+happens to have the same name (`IMG_0001.jpg`, `notes.txt`…) is skipped too, so check the Skip list. The mode used
+is written in `_ADDED_INFO.txt`. With *Delete originals*, an original skipped by a name match is **never deleted**
+(only originals whose copy is confirmed byte-identical are). VM/disk images and empty files are always copied in
+every mode.
+
+Rules for the default **Identical content** mode:
 - **Skip** only if a **byte-identical** file (same size and full sha256) is already on the drive and still
   exists unchanged (size/date as in the index; otherwise it is re-hashed first). Names don't matter: the reason
   says "(under another name)" when the existing copy is named differently.

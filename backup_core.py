@@ -566,6 +566,7 @@ class Plan:
     dest_rel: str
     items: list = field(default_factory=list)
     copied: bool = False
+    match: str = "content"
 
     def totals(self):
         t = {"COPY": [0, 0], "SKIP": [0, 0], "ERROR": [0, 0]}
@@ -602,13 +603,57 @@ def suggest_parents(root, depth=2, limit=200):
     return out
 
 
-def analyze(src, dest_rel, index, status=None, progress=None, cancel=None, rescan=False):
-    """Decide COPY/SKIP for every file of src. Builds the drive index first if there is none."""
+MATCH_MODES = {
+    "content": "Identical content (byte-identical, sha256)",
+    "name+size": "Same file name and size",
+    "name": "Same file name only",
+}
+
+
+def _name_map(index):
+    """file name (case-insensitive) -> [(path, size)] for every file in the index."""
+    names = {}
+    with index.lock:
+        for path, size in index.db.execute("select path, size from f"):
+            names.setdefault(path.rsplit("/", 1)[-1].casefold(), []).append((path, size))
+    return names
+
+
+def _find_by_name(index, root, rel, size, names, prefer, with_size):
+    cands = names.get(rel.rsplit("/", 1)[-1].casefold(), [])
+    if with_size:
+        cands = [c for c in cands if c[1] == size]
+
+    def key(c):
+        return (not any(c[0] == p or c[0].startswith(p + "/") for p in prefer), c[0])
+    for path, isize in sorted(cands, key=key):
+        full = safe_join(root, path)
+        if full is None:
+            continue
+        try:
+            st = os.stat(lp(full))
+        except OSError:
+            continue                  # gone from the drive since the index was made
+        if with_size and st.st_size != size:
+            continue
+        return path, st.st_size
+    return None
+
+
+def analyze(src, dest_rel, index, status=None, progress=None, cancel=None, rescan=False, match="content"):
+    """Decide COPY/SKIP for every file of src. Builds the drive index first if there is none.
+
+    match: "content" = skip only byte-identical files (default);
+           "name+size" = skip if a file with the same name and size is on the drive;
+           "name" = skip if a file with the same name is on the drive (content not compared).
+    """
+    if match not in MATCH_MODES:
+        raise ValueError(f"unknown compare mode: {match}")
     root = index.drive.root
     if index.empty or rescan:
         scan(index, status, cancel)
     src = os.path.abspath(src)
-    plan = Plan(source=src, dest_rel=dest_rel)
+    plan = Plan(source=src, dest_rel=dest_rel, match=match)
     if os.path.exists(join(root, dest_rel)):
         raise ValueError(f"A folder with this name already exists on the drive:\n{dest_rel}\nChoose another name or date.")
     r_root, r_src = os.path.realpath(root), os.path.realpath(src)
@@ -650,6 +695,11 @@ def analyze(src, dest_rel, index, status=None, progress=None, cancel=None, resca
             progress(done[0], total)
 
     prefer = index.prefer()
+    names = None
+    if match != "content":
+        if status:
+            status("Loading file names of the drive…")
+        names = _name_map(index)
     seen, seen_sizes = {}, set()
     for n, it in enumerate(plan.items):
         if cancel and cancel.is_set():
@@ -666,6 +716,25 @@ def analyze(src, dest_rel, index, status=None, progress=None, cancel=None, resca
             if IMAGE_EXT.search(it.rel):
                 it.reason = "VM / disk-image file (never deduplicated)"
                 it.sha = sha256_file(full, prog, cancel)
+                continue
+            if names is not None:
+                hit = _find_by_name(index, root, it.rel, it.size, names, prefer, match == "name+size")
+                if hit:
+                    path, dsize = hit
+                    it.action, it.existing = "SKIP", path
+                    it.reason = ("same name and size already on the drive (content not compared)"
+                                 if match == "name+size" else
+                                 "same name already on the drive (content not compared"
+                                 + (", same size)" if dsize == it.size else f", size differs: {human(dsize)} there)"))
+                    prog(it.size)
+                    continue
+                it.sha = sha256_file(full, prog, cancel)
+                if (it.size, it.sha) in seen:
+                    it.action, it.reason = "SKIP", "identical to another file in this same backup"
+                    it.existing = dest_rel + "/" + seen[(it.size, it.sha)]
+                else:
+                    it.reason = "new: no file with this name" + (" and size" if match == "name+size" else "") + " on the drive"
+                    seen[(it.size, it.sha)] = it.rel
                 continue
             cands = index.by_size(it.size)
             if not cands and it.size not in seen_sizes:
@@ -795,6 +864,7 @@ def execute(plan, index, delete_source=False, status=None, progress=None, cancel
     with open(lp(os.path.join(dest, "_ADDED_INFO.txt")), "w", encoding="utf-8") as f:
         f.write(f"Added with Backup Adder on {time.strftime('%Y-%m-%d %H:%M')}\n"
                 f"Source: {plan.source}\n"
+                f"Compared by: {MATCH_MODES[plan.match]}\n"
                 f"Copied: {t['COPY'][0]} files ({human(t['COPY'][1])}), verified by sha256 read-back\n"
                 f"Skipped: {t['SKIP'][0]} files ({human(t['SKIP'][1])}) - see _DUPLICATES_SKIPPED.txt\n"
                 f"Errors: {len(failures) + t['ERROR'][0]}\n" + ("CANCELLED before finishing.\n" if cancelled else ""))
@@ -819,7 +889,8 @@ def execute(plan, index, delete_source=False, status=None, progress=None, cancel
                 other = safe_join(root, it.existing)
             try:
                 if (other is None or not os.path.exists(lp(other)) or os.path.samefile(lp(src_path), lp(other))
-                        or (it.size and sha256_file(other) != it.sha)):
+                        or (it.size and (not it.sha or sha256_file(other) != it.sha))):
+                    # not byte-identical (or only matched by name): the original is kept
                     kept += 1
                     continue
                 os.remove(lp(src_path))

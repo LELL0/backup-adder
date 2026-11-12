@@ -5,6 +5,7 @@
   lellx-add SRC --drive LELLX --into BACKUPS/Phones --name "Samsung A30" --date 2027-03-01           # dry run
   lellx-add SRC --drive LELLX --into BACKUPS/Phones --name "Samsung A30" --date 2027-03-01 --apply   # copy
   lellx-add SRC --folder /path/to/target --name X --apply   # any folder as target (network share…)
+  lellx-add SRC --drive LELLX --name X --match name        # skip files whose name is already on the drive
   lellx-add --drive LELLX --find IMG_0597
   lellx-add --drive LELLX --rescan | --status | --eject
 
@@ -33,6 +34,9 @@ ap.add_argument("--into", default="", help="folder on the drive that receives th
 ap.add_argument("--name")
 ap.add_argument("--date", default="", help="YYYY-MM-DD (empty = no date)")
 ap.add_argument("--apply", action="store_true", help="really copy (otherwise only show the plan)")
+ap.add_argument("--match", choices=["content", "name+size", "name"], default="content",
+                help="how to detect files already on the drive: content (byte-identical, default), "
+                     "name+size, or name only (content not compared)")
 ap.add_argument("--rescan", action="store_true", help="update the drive index from the drive first")
 ap.add_argument("--delete-source", action="store_true", help="delete originals after verified copy")
 ap.add_argument("--report", help="write the plan as TSV")
@@ -115,7 +119,7 @@ def prog(d, t):
 
 first = idx.empty
 plan = core.analyze(a.source, dest, idx, (lambda s: print("\r" + s[:100].ljust(100), end="", flush=True)) if first or a.rescan else None,
-                    prog, None, a.rescan)
+                    prog, None, a.rescan, a.match)
 if first or a.rescan:
     publish()
 print()

@@ -28,12 +28,15 @@ The zip also contains `backup-adder-cli.exe` (command line).
 4. **Goes into folder**: pick an existing folder of the drive from the list (or type a new one),
    then **Name** and **Date (YYYY-MM-DD)**. "Will be saved as" shows the final folder, e.g.
    `E:\BACKUPS\Phones\Samsung A30 - 2027-03-01`.
-5. **Analyze** → review the table (filter: All / Will copy / Skipped / Errors; search box).
+5. **Compare by**: *Identical content* (default, safest), *Same file name and size*, or *Same file name only*
+   (name modes skip a file if any file with that name is on the drive, without comparing content; their
+   originals are never deleted by *Delete originals*).
+6. **Analyze** → review the table (filter: All / Will copy / Skipped / Errors; search box).
    Double-click a skipped file to open the folder of its existing copy. **Nothing is written yet.**
-6. **Copy to drive** → every copied file is read back and checked (sha256).
+7. **Copy to drive** → every copied file is read back and checked (sha256).
    Optional: *Delete originals after verified copy* (asks for confirmation, only runs if there were no errors,
    and keeps any original whose copy on the drive can't be re-confirmed).
-7. **Safely eject** before unplugging.
+8. **Safely eject** before unplugging.
 
 Other tabs: **Find on drive** (search the index by name), **History**.
 Buttons: **Rescan index** (if files were added or removed on the drive outside the app), **Open**.

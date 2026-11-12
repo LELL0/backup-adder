@@ -55,6 +55,38 @@ class CoreTest(unittest.TestCase):
         self.assertEqual(got["empty.txt"][0], "COPY")
         self.assertEqual(got["vm/disk.vdi"][0], "COPY")                              # images never deduped
 
+    def test_match_by_name(self):
+        write(os.path.join(self.root, "Other", "NEW.TXT"), "different content, other size")
+        write(os.path.join(self.src, "S1.txt"), "samesize-X")            # same name+size as LLO/s1.txt, other content
+        idx = core.Index(self.drive)
+        dest = core.make_dest("BACKUPS/Phones", "ByName", "")
+        plan = core.analyze(self.src, dest, idx, match="name")
+        got = {i.rel: (i.action, i.existing) for i in plan.items}
+        self.assertEqual(got["new.txt"], ("SKIP", "Other/NEW.TXT"))                    # case-insensitive name
+        self.assertEqual(got["S1.txt"], ("SKIP", "LLO/s1.txt"))
+        self.assertEqual(got["book.pdf"], ("SKIP", "LLO/Books/book.pdf"))
+        self.assertEqual(got["DCIM/a_copy.jpg"][0], "COPY")                           # name differs
+        self.assertEqual(got["vm/disk.vdi"][0], "COPY")
+        plan2 = core.analyze(self.src, core.make_dest("", "BySize", ""), idx, match="name+size")
+        got2 = {i.rel: i.action for i in plan2.items}
+        self.assertEqual(got2["new.txt"], "COPY")                                      # same name, other size
+        self.assertEqual(got2["S1.txt"], "SKIP")
+        # a file removed from the drive after indexing is not a match
+        os.remove(os.path.join(self.root, "Other", "NEW.TXT"))
+        plan3 = core.analyze(self.src, core.make_dest("", "Gone", ""), idx, match="name")
+        self.assertEqual({i.rel: i.action for i in plan3.items}["new.txt"], "COPY")
+
+    def test_name_match_never_deletes_original(self):
+        write(os.path.join(self.src, "S1.txt"), "samesize-X")
+        idx = core.Index(self.drive)
+        plan = core.analyze(self.src, core.make_dest("", "Del", ""), idx, match="name+size")
+        res = core.execute(plan, idx, delete_source=True)
+        self.assertTrue(os.path.exists(os.path.join(self.src, "S1.txt")))              # content differs: kept
+        self.assertTrue(os.path.exists(os.path.join(self.src, "book.pdf")))            # name-only match: kept
+        self.assertGreaterEqual(res["kept"], 2)
+        with open(os.path.join(self.root, "Del - no date", "_ADDED_INFO.txt"), encoding="utf-8") as f:
+            self.assertIn("Same file name and size", f.read())
+
     def test_copy_verifies_writes_notes_and_index(self):
         idx, plan = self.plan()
         res = core.execute(plan, idx)

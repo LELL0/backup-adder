@@ -144,6 +144,11 @@ class Window(Adw.ApplicationWindow):
         self.rescan_row = Adw.SwitchRow(title="Rescan the drive first",
                                         subtitle="Only needed if files were added or removed outside this app")
         g.add(self.rescan_row)
+        self.match_keys = list(core.MATCH_MODES)
+        self.compare_row = Adw.ComboRow(title="Compare files by",
+                                      subtitle="Name modes skip files without comparing content",
+                                      model=Gtk.StringList.new(list(core.MATCH_MODES.values())))
+        g.add(self.compare_row)
         self.dest_row = Adw.ActionRow(title="Will be saved as", subtitle="—")
         self.dest_row.add_css_class("property")
         self.btn_analyze = Gtk.Button(label="Analyze", valign=Gtk.Align.CENTER)
@@ -508,12 +513,13 @@ class Window(Adw.ApplicationWindow):
         self.store.remove_all()
         self.plan = None
         drive, idx, rescan = self.drive, self.index, self.rescan_row.get_active()
+        match = self.match_keys[self.compare_row.get_selected()]
 
         def work():
             first = idx.empty
             if first:
                 self.set_status("Building the index for this drive (first time only, can take a while)…")
-            plan = core.analyze(src, dest, idx, self.set_status, self.set_progress, self.cancel, rescan)
+            plan = core.analyze(src, dest, idx, self.set_status, self.set_progress, self.cancel, rescan, match)
             if first or rescan:
                 self.publish_index(drive, idx)
             GLib.idle_add(self.show_plan, plan)

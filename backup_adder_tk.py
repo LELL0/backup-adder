@@ -95,6 +95,10 @@ class App(tk.Tk):
         self.rescan_var = tk.BooleanVar()
         ttk.Checkbutton(opts, text="Rescan the drive first (if files were changed outside this app)",
                         variable=self.rescan_var).pack(side="left")
+        ttk.Label(opts, text="   Compare by:").pack(side="left")
+        self.match_var = tk.StringVar(value=core.MATCH_MODES["content"])
+        ttk.Combobox(opts, textvariable=self.match_var, values=list(core.MATCH_MODES.values()),
+                     state="readonly", width=38).pack(side="left", padx=4)
         self.btn_analyze = ttk.Button(opts, text="Analyze", command=self.on_analyze)
         self.btn_analyze.pack(side="right")
         bf.columnconfigure(1, weight=2)
@@ -368,12 +372,13 @@ class App(tk.Tk):
         self.plan = None
         self.tree.delete(*self.tree.get_children())
         rescan = self.rescan_var.get()
+        match = {v: k for k, v in core.MATCH_MODES.items()}[self.match_var.get()]
 
         def work():
             first = self.index.empty
             if first:
                 self.set_status("Building the index for this drive (first time only, can take a while)…")
-            plan = core.analyze(src, dest, self.index, self.set_status, self.set_progress, self.cancel, rescan)
+            plan = core.analyze(src, dest, self.index, self.set_status, self.set_progress, self.cancel, rescan, match)
             if first or rescan:
                 try:
                     core.prepare(self.drive, write=True)
