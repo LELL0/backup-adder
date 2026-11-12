@@ -1,0 +1,65 @@
+name: test-and-build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Import check (Tk app + core)
+        run: python -c "import backup_core, backup_adder_tk; print('ok')"
+
+  windows-exe:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PyInstaller
+        run: python -m pip install pyinstaller==6.11.1
+      - name: Build BackupAdder.exe (GUI) and backup-adder-cli.exe
+        run: |
+          pyinstaller --noconfirm --onefile --windowed --name BackupAdder backup_adder_tk.py
+          Copy-Item lellx-add cli_entry.py
+          pyinstaller --noconfirm --onefile --console --name backup-adder-cli cli_entry.py
+      - name: Smoke test the CLI exe
+        run: |
+          New-Item -ItemType Directory -Force -Path smoke\src, smoke\drive | Out-Null
+          Set-Content smoke\src\a.txt "hello"
+          .\dist\backup-adder-cli.exe smoke\src --folder smoke\drive --name Smoke --apply --quiet
+          if (-not (Test-Path "smoke\drive\Smoke - no date\a.txt")) { throw "copy failed" }
+          .\dist\backup-adder-cli.exe smoke\src --folder smoke\drive --name Smoke2 --quiet | Tee-Object out.txt
+          if (-not (Select-String -Path out.txt -Pattern "SKIP 1")) { throw "duplicate not detected" }
+      - name: Package
+        run: |
+          Copy-Item README.md dist\README.md
+          Copy-Item WINDOWS.md dist\WINDOWS.md
+          Compress-Archive -Path dist\* -DestinationPath BackupAdder-windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BackupAdder-windows
+          path: BackupAdder-windows.zip
+      - name: Release (on version tags)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create $env:GITHUB_REF_NAME BackupAdder-windows.zip --title $env:GITHUB_REF_NAME --notes "Windows build of Backup Adder (BackupAdder.exe GUI + backup-adder-cli.exe)."
