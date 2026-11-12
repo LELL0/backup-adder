@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""Command-line Backup Adder.
+
+  lellx-add SOURCE --category Phones --name "Samsung A30" --date 2027-03-01          # analyze only
+  lellx-add SOURCE --category Phones --name "Samsung A30" --date 2027-03-01 --apply  # copy
+  lellx-add --find IMG_0597                                                          # where is it?
+  lellx-add --status | --eject
+"""
+import argparse
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import lellx_core as core  # noqa: E402
+
+cats = {c[1].split(" (")[0].lower(): c[0] for c in core.CATEGORIES}
+ap = argparse.ArgumentParser(description="Add a backup to the LELLX drive without duplicates.")
+ap.add_argument("source", nargs="?")
+ap.add_argument("--category", choices=sorted(cats), default="phones")
+ap.add_argument("--name")
+ap.add_argument("--date", default="", help="YYYY-MM-DD (empty = no date)")
+ap.add_argument("--apply", action="store_true", help="really copy (otherwise only show the plan)")
+ap.add_argument("--delete-source", action="store_true", help="delete originals after verified copy")
+ap.add_argument("--report", help="write the plan as TSV to this file")
+ap.add_argument("--find")
+ap.add_argument("--status", action="store_true")
+ap.add_argument("--eject", action="store_true")
+a = ap.parse_args()
+
+if a.status:
+    for k, v in core.drive_status().items():
+        print(f"{k}: {v}")
+    sys.exit(0)
+if a.eject:
+    core.eject()
+    print("Drive ejected, safe to unplug.")
+    sys.exit(0)
+if a.find:
+    for p, s in core.Index().search(a.find):
+        print(f"{core.human(s):>9}  {p}")
+    sys.exit(0)
+if not a.source or not a.name:
+    ap.error("SOURCE and --name are required")
+
+dest = core.make_dest(cats[a.category], a.name, a.date)
+core.mount("ro")
+idx = core.Index()
+last = [0]
+
+
+def prog(d, t):
+    p = int(d * 100 / t) if t else 100
+    if p != last[0]:
+        last[0] = p
+        print(f"\r{p:3d}%", end="", flush=True)
+
+
+plan = core.analyze(a.source, dest, idx, None, prog)
+print()
+t = plan.totals()
+for it in plan.items:
+    print(f"{it.action:5s} {core.human(it.size):>9}  {it.rel}  — {it.reason}" + (f"  => {it.existing}" if it.existing else ""))
+print(f"\nDestination: {dest}\nCOPY {t['COPY'][0]} ({core.human(t['COPY'][1])})  SKIP {t['SKIP'][0]} "
+      f"({core.human(t['SKIP'][1])})  ERROR {t['ERROR'][0]}")
+if a.report:
+    core.export_report(plan, a.report)
+if not a.apply:
+    print("\nDry run only. Add --apply to copy.")
+    sys.exit(0)
+core.mount("rw")
+try:
+    res = core.execute(plan, idx, a.delete_source, lambda s: None, prog)
+finally:
+    core.mount("ro")
+print(f"\nDone. failures={len(res['failures'])} deleted_originals={res['deleted']}")

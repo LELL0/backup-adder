@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Backup Adder
+GenericName=Add backup without duplicates
+Comment=Add a new backup to the LELLX 6 TB drive, skipping files that are already on it
+Exec=python3 @DIR@/backup_adder.py
+Icon=drive-harddisk
+Terminal=false
+Categories=Utility;
+Keywords=backup;duplicate;LELLX;hdd;
+StartupWMClass=local.lellx.BackupAdder
